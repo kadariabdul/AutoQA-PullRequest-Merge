@@ -1,0 +1,66 @@
+name: Merge Branch
+
+on:
+  pull_request_review:
+    types: [submitted]
+    branches: [main]
+
+jobs:
+  merge-branch:
+    if:  contains( github.event.pull_request.labels.*.name, 'QaMerge')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@master
+      
+      - name: Merge by labeled
+        id: mergelabelId
+        uses: devmasx/merge-branch@master
+        with:
+          type: now
+          label_name: 'QA Merged'
+          target_branch: qa
+          github_token: ${{ github.token }}
+
+      - name: If Sucess
+        id: sucessLabelSetId
+        if: ${{ success() && steps.mergelabelId.conclusion == 'success' }}
+        uses: actions/github-script@v6
+        with:
+          repo: ${{ github.repository }}
+          labels: github.event.pull_request.labels.*.name
+          branch: ${{ github.event.pull_request.head.ref }}
+          pr-title: ${{ github.event.pull_request.title }}
+          pr-url: ${{ github.event.pull_request.html_url }}
+          script: |
+            github.rest.issues.addLabels({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ["QASucess"]
+            })
+      - name: If Sucess label Set
+        if: ${{ success() && steps.sucessLabelSetId.conclusion == 'success' }}
+        uses: dkershner6/post-api-call-action@v1
+        with:
+          url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          data: '{"blocks":[{"type":"header","text":{"type":"plain_text","text":"GitHub CI of QA Merge","emoji":true}},{"type":"section","text":{"type":"mrkdwn","text":"<${{ github.event.pull_request.html_url }} | ${{ github.event.pull_request.title }}>\n PR Merged from ${{ github.event.pull_request.head.ref }} to qa successfully."}}]}'
+          headers: '{"Content-Type": "application/json"}'
+
+      - name: If Failure
+        if: ${{ failure() && steps.mergelabelId.conclusion == 'failure' }}
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.issues.addLabels({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ["QAFailed"]
+            })
+      - name: If Failure label Set
+        if: ${{ failure() && steps.mergelabelId.conclusion == 'failure' }}
+        uses: dkershner6/post-api-call-action@v1
+        with:
+          url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          data: '{"blocks":[{"type":"header","text":{"type":"plain_text","text":"GitHub CI of QA Merge","emoji":true}},{"type":"section","text":{"type":"mrkdwn","text":"<${{ github.event.pull_request.html_url }} | ${{ github.event.pull_request.title }}>\n PR Unabled to Merge from ${{ github.event.pull_request.head.ref }} to qa."}}]}'
+          headers: '{"Content-Type": "application/json"}'
